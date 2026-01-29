@@ -163,44 +163,19 @@ class Database {
                 () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as total FROM agents', [], (err, row) => err ? rej(err) : res(row))),
                 () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as running FROM agents WHERE status = "running"', [], (err, row) => err ? rej(err) : res(row))),
                 () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as completed FROM agents WHERE status = "completed"', [], (err, row) => err ? rej(err) : res(row))),
-                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as errors FROM agents WHERE status = "error"', [], (err, row) => err ? rej(err) : res(row))),
-                () => new Promise((res, rej) => this.db.get('SELECT AVG(endTime - startTime) as avgTime FROM agents WHERE endTime IS NOT NULL', [], (err, row) => err ? rej(err) : res(row))),
-                // Token usage by day
-                () => new Promise((res, rej) => this.db.all(`
-                    SELECT 
-                        strftime('%Y-%m-%d', datetime(createdAt / 1000, 'unixepoch')) as date,
-                        SUM(tokensIn + tokensOut) as totalTokens,
-                        SUM(tokensIn) as tokensIn,
-                        SUM(tokensOut) as tokensOut
-                    FROM agents 
-                    GROUP BY date 
-                    ORDER BY date DESC 
-                    LIMIT 30
-                `, [], (err, rows) => err ? rej(err) : res(rows))),
-                // Token usage by hour (last 24 hours)
-                () => new Promise((res, rej) => this.db.all(`
-                    SELECT 
-                        strftime('%H:00', datetime(createdAt / 1000, 'unixepoch')) as hour,
-                        SUM(tokensIn + tokensOut) as totalTokens,
-                        SUM(tokensIn) as tokensIn,
-                        SUM(tokensOut) as tokensOut
-                    FROM agents 
-                    WHERE createdAt > ?
-                    GROUP BY hour 
-                    ORDER BY hour ASC
-                `, [Date.now() - 24 * 60 * 60 * 1000], (err, rows) => err ? rej(err) : res(rows)))
+                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as errors FROM agents WHERE status = "error"', [], (err, row) => err ? rej(err) : res(row)))
             ];
 
             Promise.all(queries.map(q => q()))
                 .then(results => {
                     resolve({
-                        total: results[0].total,
-                        running: results[1].running,
-                        completed: results[2].completed,
-                        errors: results[3].errors,
-                        avgCompletionTime: results[4].avgTime || 0,
-                        dailyUsage: results[5],
-                        hourlyUsage: results[6]
+                        total: results[0]?.total || 0,
+                        running: results[1]?.running || 0,
+                        completed: results[2]?.completed || 0,
+                        errors: results[3]?.errors || 0,
+                        avgCompletionTime: 0,
+                        dailyUsage: [],
+                        hourlyUsage: []
                     });
                 })
                 .catch(reject);
