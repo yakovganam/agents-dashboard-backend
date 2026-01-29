@@ -158,12 +158,14 @@ class AgentController {
             res.json(stats);
         } catch (error) {
             console.error('Error fetching stats:', error);
-            // Return empty stats instead of error to keep UI alive
+            // Return empty stats + error info to diagnose on Render
             res.json({
                 running: 0,
                 completed: 0,
                 error: 0,
-                total: 0
+                total: 0,
+                diagnostics: error.message,
+                stack: error.stack
             });
         }
     }
