@@ -1,209 +1,120 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
-/**
- * Clawdbot Bridge
- * Provides access to real Clawdbot session data
- */
 class ClawdbotBridge {
     constructor() {
-        this.basePath = null;
-        this.sessionsCache = null;
         this.initialized = false;
+        // Search in possible Clawdbot locations
+        this.basePath = path.join(process.env.USERPROFILE, '.clawdbot');
+        this.agentsPath = path.join(this.basePath, 'agents', 'main');
+        this.sessionsJsonPath = path.join(this.agentsPath, 'sessions', 'sessions.json');
+        this.sessionsDir = path.join(this.agentsPath, 'sessions');
+        this.cache = new Map();
+        this.lastPoll = 0;
     }
 
-    /**
-     * Initialize the bridge by locating the Clawdbot directory
-     */
     async initialize() {
-        if (this.initialized) return;
-
-        // Common locations for Clawdbot
-        const possiblePaths = [
-            process.env.CLAWDBOT_HOME,
-            path.join(os.homedir(), '.clawdbot'),
-            'C:\\Users\\yakov\\.clawdbot'
-        ].filter(Boolean);
-
-        for (const p of possiblePaths) {
-            if (fs.existsSync(p)) {
-                this.basePath = p;
-                console.log(`✅ Clawdbot located at: ${this.basePath}`);
-                break;
-            }
+        if (!fs.existsSync(this.sessionsJsonPath)) {
+            throw new Error(`Clawdbot sessions not found at ${this.sessionsJsonPath}`);
         }
-
-        if (!this.basePath) {
-            console.warn('⚠️  Could not locate Clawdbot directory. Live sessions will be unavailable.');
-            this.initialized = true; // Mark as initialized anyway to prevent constant retries
-            return;
-        }
-
         this.initialized = true;
+        return true;
     }
 
-    /**
-     * Clear the local cache to force re-reading files
-     */
-    clearCache() {
-        this.sessionsCache = null;
-    }
-
-    /**
-     * Get all active sessions from Clawdbot
-     * Maps real Clawdbot sessions to the dashboard structure
-     */
-    async getAllSessions() {
+    async getActiveSessions() {
         if (!this.initialized) await this.initialize();
-        if (!this.basePath) return []; // Return empty if no Clawdbot found
-
+        
         try {
-            const sessionsJsonPath = path.join(this.basePath, 'agents', 'main', 'sessions', 'sessions.json');
+            const data = fs.readFileSync(this.sessionsJsonPath, 'utf8');
+            const sessionsMap = JSON.parse(data);
+            const sessions = Object.values(sessionsMap);
             
-            if (!fs.existsSync(sessionsJsonPath)) {
-                console.warn(`⚠️  sessions.json not found at: ${sessionsJsonPath}`);
-                return [];
-            }
-
-            const sessionsData = JSON.parse(fs.readFileSync(sessionsJsonPath, 'utf8'));
-            const dashboardSessions = [];
-
-            for (const [key, session] of Object.entries(sessionsData)) {
-                // Determine status based on updatedAt
-                const now = Date.now();
-                const updatedAgo = now - (session.updatedAt || 0);
-                const isActive = updatedAgo < 60000; // Active if updated in the last minute
-
-                dashboardSessions.push({
-                    id: session.sessionId || key,
-                    name: session.label || key,
-                    label: session.label || key,
-                    model: session.model || 'unknown',
-                    provider: session.modelProvider || 'unknown',
-                    status: isActive ? 'running' : 'completed',
-                    progress: isActive ? 50 : 100,
-                    inputTokens: session.inputTokens || 0,
-                    outputTokens: session.outputTokens || 0,
-                    totalTokens: session.totalTokens || 0,
-                    contextTokens: session.contextTokens || 0,
-                    updatedAt: session.updatedAt || 0,
-                    lastActivity: session.updatedAt || 0,
-                    channel: session.channel || session.lastChannel || 'internal',
-                    origin: session.origin || null,
-                    startTime: session.createdAt || session.updatedAt || now,
-                    task: session.label || 'Clawdbot Session'
-                });
-            }
-
-            return dashboardSessions;
+            // Filter: active in the last 10 minutes
+            const now = Date.now();
+            return sessions.filter(s => (now - s.updatedAt) < 10 * 60 * 1000);
         } catch (error) {
-            console.error('Error reading Clawdbot sessions:', error.message);
+            console.error('Error reading sessions:', error);
             return [];
         }
     }
 
-    /**
-     * Get sessions by filter
-     */
-    async getSessionsByFilter(filter = {}) {
-        const sessions = await this.getAllSessions();
-        let filtered = [...sessions];
-
-        if (filter.model) {
-            filtered = filtered.filter(s => s.model === filter.model);
+    async getAllSessions() {
+        if (!this.initialized) await this.initialize();
+        try {
+            const data = fs.readFileSync(this.sessionsJsonPath, 'utf8');
+            return Object.values(JSON.parse(data));
+        } catch (error) {
+            return [];
         }
-
-        if (filter.status) {
-            filtered = filtered.filter(s => s.status === filter.status);
-        }
-
-        return filtered;
     }
 
-    /**
-     * Get specific session details
-     */
     async getSessionDetails(sessionId) {
         const sessions = await this.getAllSessions();
-        return sessions.find(s => s.id === sessionId);
+        return sessions.find(s => s.sessionId === sessionId || s.key === sessionId);
     }
 
-    /**
-     * Get history for a specific session
-     * Reads the .jsonl file for the session
-     */
     async getSessionLogs(sessionId) {
-        return this.getSessionHistory(sessionId);
+        try {
+            // Transcript is usually [sessionId].jsonl
+            // We need to find the correct file. sessionId is a UUID.
+            const session = await this.getSessionDetails(sessionId);
+            const actualSessionId = session ? session.sessionId : sessionId;
+            
+            const transcriptPath = path.join(this.sessionsDir, `${actualSessionId}.jsonl`);
+            if (!fs.existsSync(transcriptPath)) return [];
+
+            const lines = fs.readFileSync(transcriptPath, 'utf8').split('\n');
+            return lines
+                .filter(l => l.trim())
+                .map(l => JSON.parse(l));
+        } catch (error) {
+            console.error('Error reading logs:', error);
+            return [];
+        }
     }
 
-    /**
-     * Kill a session (mock)
-     */
-    async killSession(sessionId) {
-        console.log(`Killing session ${sessionId}`);
-        return { success: true };
+    async getSessionsByFilter(filter) {
+        let sessions = await this.getAllSessions();
+        
+        if (filter.status === 'active') {
+            const now = Date.now();
+            sessions = sessions.filter(s => (now - s.updatedAt) < 5 * 60 * 1000);
+        }
+        
+        if (filter.model) {
+            sessions = sessions.filter(s => s.model && s.model.includes(filter.model));
+        }
+
+        // Sorting
+        const sortBy = filter.sortBy || 'updatedAt';
+        const order = filter.sortOrder === 'asc' ? 1 : -1;
+        
+        sessions.sort((a, b) => (a[sortBy] > b[sortBy] ? 1 : -1) * order);
+
+        if (filter.limit) {
+            sessions = sessions.slice(0, filter.limit);
+        }
+
+        return sessions;
     }
 
-    /**
-     * Restart a session (mock)
-     */
-    async restartSession(sessionId) {
-        console.log(`Restarting session ${sessionId}`);
-        return { success: true };
-    }
-
-    /**
-     * Get statistics summary
-     */
     async getStatistics() {
         const sessions = await this.getAllSessions();
-        const activeSessions = sessions.filter(s => s.status === 'running').length;
-        const idleSessions = sessions.filter(s => s.status === 'completed').length;
-        const totalTokens = sessions.reduce((sum, s) => sum + (s.totalTokens || 0), 0);
-        const models = [...new Set(sessions.map(s => s.model))].filter(Boolean);
+        const now = Date.now();
+        const active = sessions.filter(s => (now - s.updatedAt) < 5 * 60 * 1000);
         
-        // Calculate average duration
-        let totalDuration = 0;
-        let sessionsWithDuration = 0;
-        sessions.forEach(s => {
-            if (s.startTime && s.updatedAt) {
-                totalDuration += (s.updatedAt - s.startTime);
-                sessionsWithDuration++;
-            }
-        });
-
         return {
-            activeSessions,
-            idleSessions,
             totalSessions: sessions.length,
-            totalTokens,
-            avgSessionDuration: sessionsWithDuration > 0 ? totalDuration / sessionsWithDuration : 0,
-            models
+            activeSessions: active.length,
+            models: [...new Set(sessions.map(s => s.model).filter(Boolean))],
+            lastUpdate: now
         };
     }
 
-    /**
-     * Get history for a specific session
-     * Reads the .jsonl file for the session
-     */
-    async getSessionHistory(sessionId) {
-        if (!this.initialized) await this.initialize();
-
-        try {
-            const sessionFile = path.join(this.basePath, 'agents', 'main', 'sessions', `${sessionId}.jsonl`);
-            
-            if (!fs.existsSync(sessionFile)) {
-                return [];
-            }
-
-            const lines = fs.readFileSync(sessionFile, 'utf8').split('\n').filter(Boolean);
-            return lines.map(line => JSON.parse(line));
-        } catch (error) {
-            console.error(`Error reading history for session ${sessionId}:`, error.message);
-            return [];
-        }
+    clearCache() {
+        this.cache.clear();
     }
 }
 
+// Export singleton
 module.exports = new ClawdbotBridge();

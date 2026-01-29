@@ -10,14 +10,18 @@ const SessionWatcher = require('./watchers/sessionWatcher');
 const agentsRouter = require('./routes/agents');
 const logsRouter = require('./routes/logs');
 const clawdbotRouter = require('./routes/clawdbot');
+const telemetryRouter = require('./routes/telemetry');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+const path = require('path');
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Request logging
 app.use((req, res, next) => {
@@ -29,6 +33,7 @@ app.use((req, res, next) => {
 app.use('/api/agents', agentsRouter);
 app.use('/api/logs', logsRouter);
 app.use('/api/clawdbot', clawdbotRouter);
+app.use('/api/telemetry', telemetryRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -49,11 +54,8 @@ app.use((err, req, res, next) => {
 });
 
 // 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Not found',
-        path: req.path
-    });
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Initialize database and start server
