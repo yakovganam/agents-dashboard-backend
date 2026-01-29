@@ -12,26 +12,34 @@ class Database {
 
     initialize() {
         return new Promise((resolve, reject) => {
-            this.db = new sqlite3.Database(DB_PATH, (err) => {
+            // Use :memory: if we're in a restricted environment or if specified
+            const dbSource = process.env.NODE_ENV === 'production' ? ':memory:' : DB_PATH;
+            
+            this.db = new sqlite3.Database(dbSource, (err) => {
                 if (err) {
                     console.error('Error opening database:', err);
                     reject(err);
                     return;
                 }
                 
-                console.log('Connected to SQLite database');
+                console.log(`Connected to SQLite database (${dbSource})`);
                 
-                // Load and execute schema
-                const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-                this.db.exec(schema, (err) => {
-                    if (err) {
-                        console.error('Error creating schema:', err);
-                        reject(err);
-                        return;
-                    }
-                    console.log('Database schema initialized');
-                    resolve();
-                });
+                try {
+                    // Load and execute schema
+                    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+                    this.db.exec(schema, (err) => {
+                        if (err) {
+                            console.error('Error creating schema:', err);
+                            reject(err);
+                            return;
+                        }
+                        console.log('Database schema initialized');
+                        resolve();
+                    });
+                } catch (schemaErr) {
+                    console.error('Error reading schema file:', schemaErr);
+                    reject(schemaErr);
+                }
             });
         });
     }
