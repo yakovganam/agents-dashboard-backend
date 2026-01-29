@@ -35,8 +35,9 @@ class ClawdbotBridge {
         }
 
         if (!this.basePath) {
-            console.error('❌ Could not locate Clawdbot directory');
-            throw new Error('Clawdbot directory not found');
+            console.warn('⚠️  Could not locate Clawdbot directory. Live sessions will be unavailable.');
+            this.initialized = true; // Mark as initialized anyway to prevent constant retries
+            return;
         }
 
         this.initialized = true;
@@ -55,6 +56,7 @@ class ClawdbotBridge {
      */
     async getAllSessions() {
         if (!this.initialized) await this.initialize();
+        if (!this.basePath) return []; // Return empty if no Clawdbot found
 
         try {
             const sessionsJsonPath = path.join(this.basePath, 'agents', 'main', 'sessions', 'sessions.json');
