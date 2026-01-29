@@ -152,13 +152,13 @@ class Database {
     getStats() {
         return new Promise((resolve, reject) => {
             const queries = [
-                this.db.get.bind(this.db, 'SELECT COUNT(*) as total FROM agents', []),
-                this.db.get.bind(this.db, 'SELECT COUNT(*) as running FROM agents WHERE status = "running"', []),
-                this.db.get.bind(this.db, 'SELECT COUNT(*) as completed FROM agents WHERE status = "completed"', []),
-                this.db.get.bind(this.db, 'SELECT COUNT(*) as errors FROM agents WHERE status = "error"', []),
-                this.db.get.bind(this.db, 'SELECT AVG(endTime - startTime) as avgTime FROM agents WHERE endTime IS NOT NULL', []),
+                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as total FROM agents', [], (err, row) => err ? rej(err) : res(row))),
+                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as running FROM agents WHERE status = "running"', [], (err, row) => err ? rej(err) : res(row))),
+                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as completed FROM agents WHERE status = "completed"', [], (err, row) => err ? rej(err) : res(row))),
+                () => new Promise((res, rej) => this.db.get('SELECT COUNT(*) as errors FROM agents WHERE status = "error"', [], (err, row) => err ? rej(err) : res(row))),
+                () => new Promise((res, rej) => this.db.get('SELECT AVG(endTime - startTime) as avgTime FROM agents WHERE endTime IS NOT NULL', [], (err, row) => err ? rej(err) : res(row))),
                 // Token usage by day
-                this.db.all.bind(this.db, `
+                () => new Promise((res, rej) => this.db.all(`
                     SELECT 
                         strftime('%Y-%m-%d', datetime(createdAt / 1000, 'unixepoch')) as date,
                         SUM(tokensIn + tokensOut) as totalTokens,
@@ -168,9 +168,9 @@ class Database {
                     GROUP BY date 
                     ORDER BY date DESC 
                     LIMIT 30
-                `, []),
+                `, [], (err, rows) => err ? rej(err) : res(rows))),
                 // Token usage by hour (last 24 hours)
-                this.db.all.bind(this.db, `
+                () => new Promise((res, rej) => this.db.all(`
                     SELECT 
                         strftime('%H:00', datetime(createdAt / 1000, 'unixepoch')) as hour,
                         SUM(tokensIn + tokensOut) as totalTokens,
@@ -180,10 +180,10 @@ class Database {
                     WHERE createdAt > ?
                     GROUP BY hour 
                     ORDER BY hour ASC
-                `, [Date.now() - 24 * 60 * 60 * 1000])
+                `, [Date.now() - 24 * 60 * 60 * 1000], (err, rows) => err ? rej(err) : res(rows)))
             ];
 
-            Promise.all(queries.map(q => new Promise((res, rej) => q((err, row) => err ? rej(err) : res(row)))))
+            Promise.all(queries.map(q => q()))
                 .then(results => {
                     resolve({
                         total: results[0].total,

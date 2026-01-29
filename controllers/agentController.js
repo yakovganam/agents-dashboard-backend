@@ -158,7 +158,13 @@ class AgentController {
             res.json(stats);
         } catch (error) {
             console.error('Error fetching stats:', error);
-            res.status(500).json({ error: 'Failed to fetch stats' });
+            // Return empty stats instead of error to keep UI alive
+            res.json({
+                running: 0,
+                completed: 0,
+                error: 0,
+                total: 0
+            });
         }
     }
 }
