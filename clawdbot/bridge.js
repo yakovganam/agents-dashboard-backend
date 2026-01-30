@@ -5,7 +5,8 @@ class ClawdbotBridge {
     constructor() {
         this.initialized = false;
         // Search in possible Clawdbot locations
-        this.basePath = path.join(process.env.USERPROFILE, '.clawdbot');
+        const userProfile = process.env.USERPROFILE || process.env.HOME || '/tmp';
+        this.basePath = path.join(userProfile, '.clawdbot');
         this.agentsPath = path.join(this.basePath, 'agents', 'main');
         this.sessionsJsonPath = path.join(this.agentsPath, 'sessions', 'sessions.json');
         this.sessionsDir = path.join(this.agentsPath, 'sessions');
@@ -15,14 +16,19 @@ class ClawdbotBridge {
 
     async initialize() {
         if (!fs.existsSync(this.sessionsJsonPath)) {
-            throw new Error(`Clawdbot sessions not found at ${this.sessionsJsonPath}`);
+            console.warn(`⚠️  Clawdbot sessions not found at ${this.sessionsJsonPath}. This is normal if running in the cloud without a local link.`);
+            this.initialized = false;
+            return false;
         }
         this.initialized = true;
         return true;
     }
 
     async getActiveSessions() {
-        if (!this.initialized) await this.initialize();
+        if (!this.initialized) {
+            const ok = await this.initialize();
+            if (!ok) return [];
+        }
         
         try {
             const data = fs.readFileSync(this.sessionsJsonPath, 'utf8');
@@ -39,7 +45,10 @@ class ClawdbotBridge {
     }
 
     async getAllSessions() {
-        if (!this.initialized) await this.initialize();
+        if (!this.initialized) {
+            const ok = await this.initialize();
+            if (!ok) return [];
+        }
         try {
             const data = fs.readFileSync(this.sessionsJsonPath, 'utf8');
             return Object.values(JSON.parse(data));
@@ -55,8 +64,7 @@ class ClawdbotBridge {
 
     async getSessionLogs(sessionId) {
         try {
-            // Transcript is usually [sessionId].jsonl
-            // We need to find the correct file. sessionId is a UUID.
+            if (!this.initialized) return [];
             const session = await this.getSessionDetails(sessionId);
             const actualSessionId = session ? session.sessionId : sessionId;
             
@@ -75,6 +83,7 @@ class ClawdbotBridge {
 
     async getSessionsByFilter(filter) {
         let sessions = await this.getAllSessions();
+        if (!sessions || sessions.length === 0) return [];
         
         if (filter.status === 'active') {
             const now = Date.now();
@@ -101,6 +110,16 @@ class ClawdbotBridge {
     async getStatistics() {
         const sessions = await this.getAllSessions();
         const now = Date.now();
+        
+        if (!sessions || sessions.length === 0) {
+            return {
+                totalSessions: 0,
+                activeSessions: 0,
+                models: [],
+                lastUpdate: now
+            };
+        }
+
         const active = sessions.filter(s => (now - s.updatedAt) < 5 * 60 * 1000);
         
         return {
